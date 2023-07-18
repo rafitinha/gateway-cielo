@@ -518,6 +518,100 @@ class Lkn_WC_Gateway_Cielo_Credit extends WC_Payment_Gateway {
         return false;
     }
 
+     /**
+     * Proccess refund request in order.
+     *
+     * @param int    $order_id
+     * @param float  $amount
+     * @param string $reason
+     * 
+     * @link https://www.youtube.com/watch?v=dKEtlq6bT5U WordPress Refund Order using WooCommerce custom payment gateway
+     *
+     * @return bool
+     */
+    public function _process_refund_($order_id, $amount = null, $reason = '') {
+      
+       if(function_exists('wc_get_order')){
+           $order = wc_get_order($order_id);
+       } else {
+           $order = new wc_get_order($order_id);
+       }
+
+       if(!$this->can_refund_order($order)){
+         return false;
+       }
+
+       $success = $this->create_refund($order, $amount, $order_id);
+
+       if($success){
+          $order->add_order_note(__("Refund of amount ".$amount. "sent to gateway. Reason: ".$reason, 'wc-gateway-customgateway'));
+          return true;
+       }
+      
+       $order->add_order_note(__("Refund of amount ".$amount." sent to gateway. Reason: ".$reason,'wc-gateway-customgateway'));
+       return false;
+
+    }
+    
+    public function create_refund($order,$amount,$order_id){
+       $order_id =  $order->get_transaction_id();
+
+       if(method_exists($order, 'get_currency')){
+          $currency = $order->get_currency();
+       } else {
+          $currency = $order->get_order_currency();
+       }
+
+       $return_array=array();
+
+       $data = [
+            "refundAmount" -> [
+                "amount" -> "$amount",
+                "currency"-> "$currency"
+            ],
+            "merchantReference" -> "$order_id"
+       ];
+
+       $json_array_enconded = json_encode($data);
+
+       // what ever url for you gateway to process refund along order token or transaction id
+       $url = "gatwayurl.com/transsactionid/refund";
+
+       $response = wp_remote_post($url, array(
+           'method' => 'POST',
+           'httpversion' => '1.0',
+           'headers' => array('Content-Type' => 'application/json', 'Accept'=> 'application/json',
+                          'Authorization' => 'Bearer '. $Password),
+           'body' => $json_array_enconded,                  
+       ));
+
+       $result = wp_remote_retrieve_body($response);
+
+       $body_decode = json_decode($response["body"]);
+
+       if(is_wp_error($response) || $response === false){
+        $order->add_order_note(__("Error in API Call",'wc-gateway-customgateway'));
+
+        return false;
+       }elseif($response["response"]["message"] == "OK" && $response["response"]["code"] == '200' ){
+        $order->add_order_note(__("Refunded successfully",'wc-gateway-customgateway'));
+        return true;
+       }elseif($body_decode->errorId!=''){
+        $order->add_order_note(__("Error in refunding with error id". $body_decode->errorId,'wc-gateway-customgateway'));
+        return false;
+      }
+
+      return false;
+    }
+
+    public function can_refund_order($order){
+        if($order instanceof WC_Order && method_exists($order, 'get_transaction_id')){
+          return $order && $order->get_transaction_id();
+        }
+
+        return false;
+    }
+
     /**
      * Validate card number.
      *
